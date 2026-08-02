@@ -89,17 +89,46 @@ vagrant ssh k8s-master  -c "ip -br a"
 
 ---
 
+## Box download / 404 errors
+
+### Symptom
+
+```text
+The box 'ubuntu/noble64' could not be found ... Error: 404
+```
+
+### Cause
+
+Canonical stopped publishing official Vagrant boxes for Ubuntu 24.04+.  
+This project uses `bento/ubuntu-24.04` instead.
+
+### Fix
+
+Pull the latest Vagrantfile from this repo, then:
+
+```bash
+vagrant up
+```
+
+To pre-download the box manually:
+
+```bash
+vagrant box add bento/ubuntu-24.04 --provider virtualbox
+```
+
+---
+
 ## Disk resize failures
 
 ### Symptoms
 
 - Vagrant errors while configuring primary disks
-- Guest root filesystem still ~10 GB after boot
+- Guest root filesystem unexpectedly small
 
 ### Fixes
 
+- `bento/ubuntu-24.04` already ships ~64 GB disks (meets master 60 GB / worker 40 GB). The Vagrantfile only requests a grow when a size **larger than 64 GB** is configured.
 - Use **Vagrant >= 2.3** and a recent VirtualBox
-- Ensure `VAGRANT_EXPERIMENTAL=disks` is set on older Vagrant (the Vagrantfile sets this)
 - Destroy and recreate if a previous partial disk resize left the VM inconsistent:
 
 ```bash
