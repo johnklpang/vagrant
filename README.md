@@ -41,7 +41,7 @@ No manual steps are required after `vagrant up`.
 
 **CNI:** Cilium (latest stable) with kube-proxy replacement and Hubble  
 **Runtime:** containerd (systemd cgroup)  
-**OS:** Ubuntu 24.04 LTS (`ubuntu/noble64` official box)
+**OS:** Ubuntu 24.04 LTS via `bento/ubuntu-24.04` (Canonical no longer publishes official 24.04+ Vagrant boxes; `ubuntu/noble64` returns 404)
 
 ---
 
@@ -136,7 +136,7 @@ vagrant up
 
 What happens automatically:
 
-1. Downloads the Ubuntu 24.04 LTS box (first run)
+1. Downloads the Ubuntu 24.04 LTS box (`bento/ubuntu-24.04`) on first run
 2. Creates 4 VirtualBox VMs with the specs above
 3. Configures Linux users, packages, kernel modules, and sysctl
 4. Installs containerd, kubeadm, kubelet, kubectl
@@ -266,6 +266,7 @@ vagrant up
 
 ## Notes
 
+- **Box choice:** Starting with Ubuntu 24.04, Canonical no longer produces official Vagrant images. This lab uses [`bento/ubuntu-24.04`](https://app.vagrantup.com/bento/boxes/ubuntu-24.04) (Vanilla Ubuntu 24.04 Server with VirtualBox support). Disk capacity on the box is ~64 GB, which satisfies the 60 GB master / 40 GB worker targets.
 - Kubernetes packages are pinned with `apt-mark hold` after install.
 - Swap and UFW are disabled on every node.
 - Cluster join credentials and kubeconfig are stored under `.cluster/` (ignored by git).
