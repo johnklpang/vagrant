@@ -1,0 +1,12 @@
+# Vagrant / VirtualBox local state
+.vagrant/
+
+# Cluster secrets and generated artifacts (kubeconfig, join tokens, reports)
+.cluster/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*~

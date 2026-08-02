@@ -1,0 +1,8 @@
+# Ensure shell scripts and Vagrant files keep LF endings on Windows checkouts
+* text=auto eol=lf
+
+*.sh   text eol=lf
+Vagrantfile text eol=lf
+*.toml text eol=lf
+*.conf text eol=lf
+*.md   text eol=lf
