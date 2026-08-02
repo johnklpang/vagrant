@@ -147,6 +147,38 @@ lsblk
 
 ---
 
+## Provisioning fails at Kubernetes package verification
+
+### Symptom
+
+```text
++ dpkg -l kubelet kubeadm kubectl
++ grep -E '^ii'
+The SSH command responded with a non-zero exit status.
+```
+
+### Cause
+
+After `apt-mark hold`, `dpkg -l` reports status `hi` (held + installed), not `ii`.  
+A check that only matches `^ii` exits non-zero under `set -o pipefail`.
+
+### Fix
+
+Use a current `scripts/install-kubernetes.sh` that accepts held packages, then continue:
+
+```bash
+vagrant provision k8s-master
+```
+
+Or destroy and recreate:
+
+```bash
+vagrant destroy -f
+vagrant up
+```
+
+---
+
 ## `kubeadm init` failures
 
 ### Symptoms

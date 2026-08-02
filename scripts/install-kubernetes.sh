@@ -74,6 +74,12 @@ kubeadm version -o short
 kubelet --version
 kubectl version --client=true
 
-dpkg -l kubelet kubeadm kubectl | grep -E '^ii'
+# After `apt-mark hold`, dpkg status is "hi" (hold+installed), not "ii".
+# Accept both so verification does not fail under `set -o pipefail`.
+INSTALLED_PKGS="$(dpkg -l kubelet kubeadm kubectl | awk '/^[ih]i / {print $2}' | sort | tr '\n' ' ')"
+echo "Installed/held packages: ${INSTALLED_PKGS}"
+echo "${INSTALLED_PKGS}" | grep -qw kubelet
+echo "${INSTALLED_PKGS}" | grep -qw kubeadm
+echo "${INSTALLED_PKGS}" | grep -qw kubectl
 
 log "Kubernetes packages installed and pinned successfully (${AVAILABLE_VERSION})"
