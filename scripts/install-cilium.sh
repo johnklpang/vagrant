@@ -22,9 +22,9 @@ export PATH="/usr/local/bin:${PATH}"
 MASTER_IP="${MASTER_IP:-192.168.56.10}"
 CILIUM_CLI_VERSION="${CILIUM_CLI_VERSION:-}"
 CLUSTER_DIR="/vagrant/.cluster"
-# Hubble UI is optional for the lab requirements and often OOMs / times out on a 4GB
-# control plane. Enable with ENABLE_HUBBLE_UI=true if the host has spare capacity.
-ENABLE_HUBBLE_UI="${ENABLE_HUBBLE_UI:-false}"
+# Hubble UI is enabled by default. Set ENABLE_HUBBLE_UI=false to skip it on very
+# memory-constrained hosts.
+ENABLE_HUBBLE_UI="${ENABLE_HUBBLE_UI:-true}"
 
 [[ -f "${KUBECONFIG}" ]] || err "KUBECONFIG not found at ${KUBECONFIG}"
 mkdir -p "${CLUSTER_DIR}"
@@ -251,10 +251,23 @@ if [[ "${RELAY_OK}" -ne 1 ]]; then
 fi
 
 # -----------------------------------------------------------------------------
-# Phase 3 (optional): Hubble UI — best effort on 4GB control planes
+# Phase 3: Hubble UI (enabled by default)
 # -----------------------------------------------------------------------------
 if [[ "${ENABLE_HUBBLE_UI}" == "true" ]]; then
-  log "Phase 3: enabling Hubble UI (ENABLE_HUBBLE_UI=true)"
+  log "Phase 3: enabling Hubble UI"
+
+  # Pre-pull UI images (frontend/backend share the hubble-ui repository tags).
+  UI_TAG="${RELAY_TAG:-v1.19.5}"
+  for img in \
+    "quay.io/cilium/hubble-ui:${UI_TAG}" \
+    "quay.io/cilium/hubble-ui-backend:${UI_TAG}"
+  do
+    log "Pre-pulling ${img}"
+    ctr -n k8s.io images pull "${img}" >/dev/null 2>&1 \
+      || crictl pull "${img}" >/dev/null 2>&1 \
+      || log "WARNING: could not pre-pull ${img}; continuing"
+  done
+
   CILIUM_UI_ARGS=(
     "${CILIUM_RELAY_ARGS[@]}"
     --set hubble.ui.enabled=true
@@ -264,18 +277,36 @@ if [[ "${ENABLE_HUBBLE_UI}" == "true" ]]; then
     --set hubble.ui.backend.resources.requests.cpu=50m
     --set hubble.ui.backend.resources.requests.memory=64Mi
   )
-  set +e
-  cilium hubble enable --relay --ui
-  set -e
-  if ! install_or_upgrade "${CILIUM_UI_ARGS[@]}"; then
-    log "WARNING: Hubble UI enablement failed — continuing because Hubble + relay are healthy"
+
+  UI_OK=0
+  for attempt in 1 2 3; do
+    log "Hubble UI enable attempt ${attempt}/3"
+    set +e
+    cilium hubble enable --relay --ui
+    set -e
+    if install_or_upgrade "${CILIUM_UI_ARGS[@]}"; then
+      kubectl -n kube-system get pods -l k8s-app=hubble-ui -o wide || true
+      if kubectl -n kube-system rollout status deploy/hubble-ui --timeout=600s; then
+        UI_OK=1
+        break
+      fi
+    fi
+    log "Hubble UI not ready yet — collecting diagnostics and retrying"
     dump_diagnostics
-  elif ! kubectl -n kube-system rollout status deploy/hubble-ui --timeout=600s; then
-    log "WARNING: Hubble UI rollout not ready — continuing because Hubble + relay are healthy"
+    kubectl -n kube-system delete deploy hubble-ui --ignore-not-found=true --wait=true --timeout=120s || true
+    sleep 15
+  done
+
+  if [[ "${UI_OK}" -ne 1 ]]; then
     dump_diagnostics
+    err "Hubble UI failed to become ready after retries"
   fi
+
+  log "Hubble UI is Ready"
+  log "Access from the host with: vagrant ssh k8s-master -c 'cilium hubble ui'"
+  log "Or: kubectl -n kube-system port-forward svc/hubble-ui 12000:80"
 else
-  log "Phase 3: skipping Hubble UI (set ENABLE_HUBBLE_UI=true to enable)"
+  log "Phase 3: skipping Hubble UI (ENABLE_HUBBLE_UI=${ENABLE_HUBBLE_UI})"
 fi
 
 log "Final Cilium status check"

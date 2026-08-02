@@ -336,7 +336,7 @@ resource Deployment/kube-system/hubble-ui not ready.
 
 1. Cilium dataplane + Hubble on agents
 2. Hubble Relay (required), with **control-plane tolerations**, valid `retryTimeout`/resources, image pre-pull, and retries
-3. Hubble UI only when `ENABLE_HUBBLE_UI=true` (optional; off by default)
+3. Hubble UI (on by default; set `ENABLE_HUBBLE_UI=false` to skip)
 
 ### Recovery on an existing VM
 
@@ -359,13 +359,39 @@ Inspect diagnostics written during failures:
 type .cluster\cilium-diagnostics.txt
 ```
 
-### Optional: enable Hubble UI
+### Enable Hubble UI on an existing cluster
 
-If the host has spare RAM/CPU, provision with:
+UI is enabled by default on new installs. On a cluster that was built with UI off:
 
 ```bat
-set ENABLE_HUBBLE_UI=true
 vagrant ssh k8s-master -c "sudo ENABLE_HUBBLE_UI=true bash /vagrant/scripts/install-cilium.sh"
+```
+
+Verify:
+
+```bat
+vagrant ssh k8s-master -c "kubectl -n kube-system get deploy,pods -l k8s-app=hubble-ui -o wide"
+vagrant ssh k8s-master -c "cilium status"
+```
+
+Open the UI:
+
+```bat
+vagrant ssh k8s-master -- -L 12000:127.0.0.1:12000
+```
+
+Then inside that SSH session:
+
+```bash
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80 --address 127.0.0.1
+```
+
+Browse to `http://127.0.0.1:12000` on the host.
+
+To disable UI later:
+
+```bat
+vagrant ssh k8s-master -c "sudo ENABLE_HUBBLE_UI=false bash -lc 'cilium hubble enable --relay && cilium upgrade --reuse-values --set hubble.ui.enabled=false --wait'"
 ```
 
 ---

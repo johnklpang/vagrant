@@ -39,11 +39,28 @@ No manual steps are required after `vagrant up`.
 | `k8s-worker2` | Worker | `192.168.56.12` | 2 | 2 GB | 40 GB |
 | `k8s-worker3` | Worker | `192.168.56.13` | 2 | 2 GB | 40 GB |
 
-**CNI:** Cilium (latest stable) with kube-proxy replacement and Hubble Relay  
+**CNI:** Cilium (latest stable) with kube-proxy replacement, Hubble Relay, and Hubble UI  
 **Runtime:** containerd (systemd cgroup)  
 **OS:** Ubuntu 24.04 LTS via `bento/ubuntu-24.04` (Canonical no longer publishes official 24.04+ Vagrant boxes; `ubuntu/noble64` returns 404)
 
-> Hubble UI is optional on this lab (`ENABLE_HUBBLE_UI=true`) because the 4 GB control plane often hits rollout deadlines pulling/running the UI. Hubble observability via Relay remains enabled by default.
+### Access Hubble UI
+
+After the cluster is up:
+
+```bash
+vagrant ssh k8s-master
+cilium hubble ui
+```
+
+Or port-forward manually and open `http://127.0.0.1:12000` in a browser on the host (with an additional host-side forward if needed):
+
+```bash
+vagrant ssh k8s-master -- -L 12000:127.0.0.1:12000
+# inside the VM:
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80 --address 127.0.0.1
+```
+
+To skip UI on very small hosts: set `ENABLE_HUBBLE_UI=false` before `vagrant up`.
 
 ---
 

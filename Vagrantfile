@@ -144,8 +144,8 @@ Vagrant.configure("2") do |config|
           path: "scripts/install-cilium.sh",
           env: {
             "MASTER_IP" => MASTER_IP,
-            # Hubble UI is optional; Relay satisfies "Hubble enabled" on 4GB masters.
-            "ENABLE_HUBBLE_UI" => ENV.fetch("ENABLE_HUBBLE_UI", "false")
+            # Hubble UI enabled by default; set ENABLE_HUBBLE_UI=false to skip.
+            "ENABLE_HUBBLE_UI" => ENV.fetch("ENABLE_HUBBLE_UI", "true")
           }
       else
         node_config.vm.provision "shell",
