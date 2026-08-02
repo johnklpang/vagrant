@@ -1,0 +1,8 @@
+
+vagrant ssh k8s-master -c "sudo ENABLE_HUBBLE_UI=true bash /vagrant/scripts/install-cilium.sh"
+
+vagrant ssh k8s-master -- -L 12000:127.0.0.1:12000
+
+kubectl -n kube-system port-forward svc/hubble-ui 12000:80 --address 127.0.0.1
+
+Browse to http://127.0.0.1:12000
