@@ -15,14 +15,23 @@
 
 Vagrant.require_version ">= 2.3.0"
 
-# Enable the disk feature on Vagrant versions that still gate it experimentally.
-ENV["VAGRANT_EXPERIMENTAL"] ||= "disks"
-
 # -----------------------------------------------------------------------------
 # Cluster topology
 # -----------------------------------------------------------------------------
-# Official Ubuntu 24.04 LTS (Noble Numbat) Vagrant box — downloaded automatically.
-BOX_IMAGE = "ubuntu/noble64"
+# Ubuntu 24.04 LTS (Noble Numbat).
+# Canonical no longer publishes official Vagrant boxes for 24.04+
+# (ubuntu/noble64 -> 404). Use the community-standard Bento box, which is
+# Ubuntu Server 24.04 with VirtualBox Guest Additions and is downloaded
+# automatically from Vagrant Cloud on first `vagrant up`.
+BOX_IMAGE = "bento/ubuntu-24.04"
+
+# Bento ships a ~64GB primary disk, which already meets the lab targets
+# (master >= 60GB, workers >= 40GB). Vagrant cannot shrink disks, so we do
+# not force a smaller size. Optionally grow the master further below.
+MASTER_DISK_GB = 60
+WORKER_DISK_GB = 40
+# Bento default is typically 64; only request a grow when larger.
+BENTO_DEFAULT_DISK_GB = 64
 
 NETWORK_PREFIX = "192.168.56"
 MASTER_IP      = "#{NETWORK_PREFIX}.10"
@@ -32,28 +41,28 @@ NODES = {
     ip: MASTER_IP,
     cpus: 2,
     memory: 4096,
-    disk: "60GB",
+    disk_gb: MASTER_DISK_GB,
     role: "master"
   },
   "k8s-worker1" => {
     ip: "#{NETWORK_PREFIX}.11",
     cpus: 2,
     memory: 2048,
-    disk: "40GB",
+    disk_gb: WORKER_DISK_GB,
     role: "worker"
   },
   "k8s-worker2" => {
     ip: "#{NETWORK_PREFIX}.12",
     cpus: 2,
     memory: 2048,
-    disk: "40GB",
+    disk_gb: WORKER_DISK_GB,
     role: "worker"
   },
   "k8s-worker3" => {
     ip: "#{NETWORK_PREFIX}.13",
     cpus: 2,
     memory: 2048,
-    disk: "40GB",
+    disk_gb: WORKER_DISK_GB,
     role: "worker",
     final_validator: true
   }
@@ -82,8 +91,12 @@ Vagrant.configure("2") do |config|
       # Host-only / private network so all nodes can communicate
       node_config.vm.network "private_network", ip: node[:ip]
 
-      # Grow the primary disk to the requested size (ubuntu/noble64 defaults are smaller)
-      node_config.vm.disk :disk, size: node[:disk], primary: true
+      # Grow primary disk only when the requested size exceeds the box default.
+      # (Vagrant/VirtualBox cannot shrink an existing virtual disk.)
+      if node[:disk_gb] > BENTO_DEFAULT_DISK_GB
+        ENV["VAGRANT_EXPERIMENTAL"] ||= "disks"
+        node_config.vm.disk :disk, size: "#{node[:disk_gb]}GB", primary: true
+      end
 
       node_config.vm.provider "virtualbox" do |vb|
         vb.name   = name
