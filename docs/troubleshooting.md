@@ -325,17 +325,17 @@ resource Deployment/kube-system/hubble-ui not ready.
 
 ### Causes
 
-- 4 GB control plane is tight once API server, etcd, Cilium, and Hubble run together
-- Hubble Relay peer dial timeout is too aggressive on slow VirtualBox/NAT labs
-- Hubble UI image pulls / memory pressure cause rollout deadlines on small hosts
-- A previous failed rollout leaves Deployments stuck, so the next `--wait` install fails immediately
+- **Most common in this lab:** `kubeadm` taints the control plane (`node-role.kubernetes.io/control-plane:NoSchedule`). Hubble Relay/UI have **no tolerations by default**, so on a master-only cluster the pods stay `Pending` until `ProgressDeadlineExceeded`.
+- Invalid Helm keys (for example `hubble.relay.dialTimeout`) are rejected by Cilium’s values schema and abort the upgrade, leaving Relay disabled.
+- 4 GB control plane + slow VirtualBox/NAT image pulls can also delay rollouts.
+- A previous failed rollout leaves Deployments stuck, so the next `--wait` install fails quickly.
 
 ### What the project does now
 
 `scripts/install-cilium.sh` installs in phases:
 
 1. Cilium dataplane + Hubble on agents
-2. Hubble Relay (required), with higher dial/retry timeouts and lower resource requests
+2. Hubble Relay (required), with **control-plane tolerations**, valid `retryTimeout`/resources, image pre-pull, and retries
 3. Hubble UI only when `ENABLE_HUBBLE_UI=true` (optional; off by default)
 
 ### Recovery on an existing VM

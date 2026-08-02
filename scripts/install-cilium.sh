@@ -35,8 +35,9 @@ dump_diagnostics() {
     echo "===== Cilium / Hubble diagnostics $(date -u +'%Y-%m-%dT%H:%M:%SZ') ====="
     kubectl get nodes -o wide || true
     kubectl -n kube-system get pods -o wide || true
-    kubectl -n kube-system get deploy,ds,svc || true
+    kubectl -n kube-system get deploy,ds,svc,events --sort-by=.lastTimestamp || true
     kubectl -n kube-system describe deploy hubble-relay 2>/dev/null || true
+    kubectl -n kube-system describe pods -l k8s-app=hubble-relay 2>/dev/null || true
     kubectl -n kube-system describe deploy hubble-ui 2>/dev/null || true
     kubectl -n kube-system logs -l k8s-app=hubble-relay --tail=100 2>/dev/null || true
     kubectl -n kube-system logs -l k8s-app=hubble-ui --tail=100 2>/dev/null || true
@@ -105,7 +106,6 @@ for i in $(seq 1 60); do
 done
 
 # Clear previously failed Hubble rollouts so re-provision can recreate them.
-# A Deployment stuck in ProgressDeadlineExceeded blocks subsequent --wait installs.
 if kubectl -n kube-system get deploy hubble-relay >/dev/null 2>&1; then
   RELAY_STATUS="$(kubectl -n kube-system get deploy hubble-relay -o jsonpath='{.status.conditions[?(@.type=="Progressing")].reason}' 2>/dev/null || true)"
   if [[ "${RELAY_STATUS}" == "ProgressDeadlineExceeded" ]]; then
@@ -121,10 +121,41 @@ if kubectl -n kube-system get deploy hubble-ui >/dev/null 2>&1; then
   fi
 fi
 
+install_or_upgrade() {
+  local -a args=("$@")
+  if kubectl -n kube-system get daemonset cilium >/dev/null 2>&1; then
+    log "Cilium DaemonSet present — upgrading"
+    if ! cilium upgrade "${args[@]}" --wait --wait-duration 20m; then
+      log "cilium upgrade failed — falling back to cilium install"
+      cilium install "${args[@]}" --wait --wait-duration 20m
+    fi
+  else
+    log "Installing Cilium"
+    cilium install "${args[@]}" --wait --wait-duration 20m
+  fi
+}
+
 # -----------------------------------------------------------------------------
-# Phase 1: Cilium dataplane + Hubble on agents (no relay/UI wait yet)
-# k8sServiceHost/Port are required when kube-proxy is skipped.
+# Shared Helm values
+#
+# Critical for single-node / control-plane-first labs:
+#   kubeadm taints the control plane with
+#   node-role.kubernetes.io/control-plane:NoSchedule
+#   Hubble Relay/UI have EMPTY tolerations by default, so they stay Pending
+#   forever on a master-only cluster and hit ProgressDeadlineExceeded.
+#
+# Do NOT set unknown keys (e.g. hubble.relay.dialTimeout) — Cilium's values
+# schema rejects them and the entire Helm upgrade fails.
 # -----------------------------------------------------------------------------
+CONTROL_PLANE_TOLERATION_ARGS=(
+  --set 'hubble.relay.tolerations[0].key=node-role.kubernetes.io/control-plane'
+  --set 'hubble.relay.tolerations[0].operator=Exists'
+  --set 'hubble.relay.tolerations[0].effect=NoSchedule'
+  --set 'hubble.ui.tolerations[0].key=node-role.kubernetes.io/control-plane'
+  --set 'hubble.ui.tolerations[0].operator=Exists'
+  --set 'hubble.ui.tolerations[0].effect=NoSchedule'
+)
+
 CILIUM_BASE_ARGS=(
   --set kubeProxyReplacement=true
   --set k8sServiceHost="${MASTER_IP}"
@@ -134,23 +165,30 @@ CILIUM_BASE_ARGS=(
   --set hubble.ui.enabled=false
   --set operator.replicas=1
   --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16
+  "${CONTROL_PLANE_TOLERATION_ARGS[@]}"
 )
 
-install_or_upgrade() {
-  local -a args=("$@")
-  if kubectl -n kube-system get daemonset cilium >/dev/null 2>&1; then
-    log "Cilium DaemonSet present — upgrading: ${args[*]}"
-    if ! cilium upgrade "${args[@]}" --wait --wait-duration 20m; then
-      log "cilium upgrade failed — falling back to cilium install"
-      cilium install "${args[@]}" --wait --wait-duration 20m
-    fi
-  else
-    log "Installing Cilium: ${args[*]}"
-    cilium install "${args[@]}" --wait --wait-duration 20m
-  fi
-}
+CILIUM_RELAY_ARGS=(
+  --set kubeProxyReplacement=true
+  --set k8sServiceHost="${MASTER_IP}"
+  --set k8sServicePort=6443
+  --set hubble.enabled=true
+  --set hubble.relay.enabled=true
+  --set hubble.ui.enabled=false
+  --set operator.replicas=1
+  --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16
+  --set hubble.relay.retryTimeout=30s
+  --set hubble.relay.rollOutPods=true
+  --set hubble.relay.resources.requests.cpu=50m
+  --set hubble.relay.resources.requests.memory=64Mi
+  --set hubble.relay.resources.limits.memory=256Mi
+  "${CONTROL_PLANE_TOLERATION_ARGS[@]}"
+)
 
-log "Phase 1: installing Cilium dataplane with Hubble enabled on agents"
+# -----------------------------------------------------------------------------
+# Phase 1: Cilium dataplane (Hubble on agents, relay deferred)
+# -----------------------------------------------------------------------------
+log "Phase 1: installing Cilium dataplane with kube-proxy replacement"
 if ! install_or_upgrade "${CILIUM_BASE_ARGS[@]}"; then
   dump_diagnostics
   err "Cilium dataplane installation failed"
@@ -162,42 +200,47 @@ if ! cilium status --wait --wait-duration 15m; then
   err "Cilium status unhealthy after dataplane install"
 fi
 
-# -----------------------------------------------------------------------------
-# Phase 2: Hubble Relay (required). Tuned for small VirtualBox labs.
-# -----------------------------------------------------------------------------
-CILIUM_RELAY_ARGS=(
-  --set kubeProxyReplacement=true
-  --set k8sServiceHost="${MASTER_IP}"
-  --set k8sServicePort=6443
-  --set hubble.enabled=true
-  --set hubble.relay.enabled=true
-  --set hubble.ui.enabled=false
-  --set operator.replicas=1
-  --set ipam.operator.clusterPoolIPv4PodCIDRList=10.244.0.0/16
-  # Constrained lab / slow NAT image pulls: give relay more time to connect
-  --set hubble.relay.dialTimeout=30s
-  --set hubble.relay.retryTimeout=30s
-  --set hubble.relay.rollOutPods=true
-  --set hubble.relay.resources.requests.cpu=50m
-  --set hubble.relay.resources.requests.memory=64Mi
-  --set hubble.relay.resources.limits.memory=256Mi
-  --set hubble.relay.livenessProbe.failureThreshold=20
-  --set hubble.relay.readinessProbe.failureThreshold=20
-)
+# Pre-pull Hubble Relay image to reduce VirtualBox/NAT pull timeouts during rollout.
+RELAY_IMAGE="$(kubectl -n kube-system get ds cilium -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null | sed 's#/cilium:#/hubble-relay:#' || true)"
+if [[ -z "${RELAY_IMAGE}" || "${RELAY_IMAGE}" != *hubble-relay* ]]; then
+  RELAY_IMAGE="quay.io/cilium/hubble-relay:v1.19.5"
+fi
+log "Pre-pulling Hubble Relay image: ${RELAY_IMAGE}"
+ctr -n k8s.io images pull "${RELAY_IMAGE}" >/dev/null 2>&1 \
+  || crictl pull "${RELAY_IMAGE}" >/dev/null 2>&1 \
+  || log "WARNING: could not pre-pull ${RELAY_IMAGE}; continuing"
 
+# -----------------------------------------------------------------------------
+# Phase 2: enable Hubble Relay via official CLI + toleration-aware upgrade
+# -----------------------------------------------------------------------------
 log "Phase 2: enabling Hubble Relay"
 RELAY_OK=0
 for attempt in 1 2 3; do
   log "Hubble Relay enable attempt ${attempt}/3"
+
+  # Official path (reuse-values + hubble.relay.enabled=true). Follow with an
+  # upgrade that injects control-plane tolerations and lab-friendly resources.
+  set +e
+  cilium hubble enable --relay
+  ENABLE_RC=$?
+  set -e
+
+  if [[ "${ENABLE_RC}" -ne 0 ]]; then
+    log "cilium hubble enable returned ${ENABLE_RC}; trying explicit upgrade"
+  fi
+
   if install_or_upgrade "${CILIUM_RELAY_ARGS[@]}"; then
-    # Explicit wait for the relay deployment
+    # Show scheduling state for easier debugging
+    kubectl -n kube-system get pods -l k8s-app=hubble-relay -o wide || true
     if kubectl -n kube-system rollout status deploy/hubble-relay --timeout=600s; then
       RELAY_OK=1
       break
     fi
   fi
+
   log "Hubble Relay not ready yet — collecting diagnostics and retrying"
   dump_diagnostics
+  # Pending pods often mean taints/affinity; force recreate after value fixes
   kubectl -n kube-system delete deploy hubble-relay --ignore-not-found=true --wait=true --timeout=120s || true
   sleep 15
 done
@@ -221,6 +264,9 @@ if [[ "${ENABLE_HUBBLE_UI}" == "true" ]]; then
     --set hubble.ui.backend.resources.requests.cpu=50m
     --set hubble.ui.backend.resources.requests.memory=64Mi
   )
+  set +e
+  cilium hubble enable --relay --ui
+  set -e
   if ! install_or_upgrade "${CILIUM_UI_ARGS[@]}"; then
     log "WARNING: Hubble UI enablement failed — continuing because Hubble + relay are healthy"
     dump_diagnostics
@@ -239,10 +285,21 @@ if ! cilium status --wait --wait-duration 15m | tee "${CLUSTER_DIR}/cilium-statu
 fi
 cilium status --verbose | tee -a "${CLUSTER_DIR}/cilium-status.txt" || true
 
-# Confirm Hubble is actually enabled
+# Confirm Hubble Relay is enabled and Ready
 if ! kubectl -n kube-system get deploy hubble-relay >/dev/null 2>&1; then
   dump_diagnostics
   err "hubble-relay deployment missing after install"
+fi
+READY_REPLICAS="$(kubectl -n kube-system get deploy hubble-relay -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
+if [[ "${READY_REPLICAS}" -lt 1 ]]; then
+  dump_diagnostics
+  err "hubble-relay has no Ready replicas"
+fi
+
+# cilium status should report Hubble Relay as OK (not disabled)
+if cilium status 2>/dev/null | grep -qi 'Hubble Relay:.*disabled'; then
+  dump_diagnostics
+  err "Cilium still reports Hubble Relay as disabled"
 fi
 
 log "Cilium installation completed successfully on the control plane"
