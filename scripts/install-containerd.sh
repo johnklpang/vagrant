@@ -21,11 +21,13 @@ apt-get install -y ca-certificates curl gnupg apt-transport-https
 # -----------------------------------------------------------------------------
 log "Configuring Docker apt repository for containerd.io"
 install -m 0755 -d /etc/apt/keyrings
-if [[ ! -f /etc/apt/keyrings/docker.gpg ]]; then
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-fi
+# Always refresh the keyring idempotently; avoid gpg TTY overwrite prompts.
+TMP_DOCKER_KEYRING="$(mktemp)"
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | gpg --batch --yes --dearmor -o "${TMP_DOCKER_KEYRING}"
+install -m 0644 "${TMP_DOCKER_KEYRING}" /etc/apt/keyrings/docker.gpg
+chmod a+r /etc/apt/keyrings/docker.gpg
+rm -f "${TMP_DOCKER_KEYRING}"
 
 ARCH="$(dpkg --print-architecture)"
 CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"

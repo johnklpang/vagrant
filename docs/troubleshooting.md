@@ -147,6 +147,31 @@ lsblk
 
 ---
 
+## Provisioning fails with `gpg: cannot open '/dev/tty'`
+
+### Symptom
+
+```text
++ curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.36/deb/Release.key
++ gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+gpg: cannot open '/dev/tty': No such device or address
+```
+
+### Cause
+
+Re-running provisioning tries to overwrite an existing apt keyring.  
+`gpg --dearmor` prompts for confirmation via `/dev/tty`, which is unavailable over Vagrant SSH.
+
+### Fix
+
+Use scripts that write the keyring via `gpg --batch --yes` (or to a temp file + `install`), then continue:
+
+```bash
+vagrant provision k8s-master
+```
+
+---
+
 ## Provisioning fails at Kubernetes package verification
 
 ### Symptom

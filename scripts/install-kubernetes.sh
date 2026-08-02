@@ -23,9 +23,12 @@ log "Latest stable: ${STABLE_TAG} (pkgs.k8s.io/core:/stable:/v${KUBE_MINOR})"
 # -----------------------------------------------------------------------------
 log "Configuring pkgs.k8s.io apt repository"
 install -m 0755 -d /etc/apt/keyrings
+# --batch --yes: non-interactive overwrite when re-provisioning (no /dev/tty)
+TMP_KEYRING="$(mktemp)"
 curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${KUBE_MINOR}/deb/Release.key" \
-  | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
-chmod 0644 /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+  | gpg --batch --yes --dearmor -o "${TMP_KEYRING}"
+install -m 0644 "${TMP_KEYRING}" /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+rm -f "${TMP_KEYRING}"
 
 cat > /etc/apt/sources.list.d/kubernetes.list <<EOF
 deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${KUBE_MINOR}/deb/ /
