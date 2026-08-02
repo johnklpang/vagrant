@@ -39,9 +39,11 @@ No manual steps are required after `vagrant up`.
 | `k8s-worker2` | Worker | `192.168.56.12` | 2 | 2 GB | 40 GB |
 | `k8s-worker3` | Worker | `192.168.56.13` | 2 | 2 GB | 40 GB |
 
-**CNI:** Cilium (latest stable) with kube-proxy replacement and Hubble  
+**CNI:** Cilium (latest stable) with kube-proxy replacement and Hubble Relay  
 **Runtime:** containerd (systemd cgroup)  
 **OS:** Ubuntu 24.04 LTS via `bento/ubuntu-24.04` (Canonical no longer publishes official 24.04+ Vagrant boxes; `ubuntu/noble64` returns 404)
+
+> Hubble UI is optional on this lab (`ENABLE_HUBBLE_UI=true`) because the 4 GB control plane often hits rollout deadlines pulling/running the UI. Hubble observability via Relay remains enabled by default.
 
 ---
 

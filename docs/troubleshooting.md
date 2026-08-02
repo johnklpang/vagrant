@@ -313,6 +313,63 @@ vagrant ssh k8s-master -c "sudo bash /vagrant/scripts/install-cilium.sh"
 
 ---
 
+## Hubble Relay / UI `Progress deadline exceeded`
+
+### Symptom
+
+```text
+Unable to install Cilium: resource Deployment/kube-system/hubble-relay not ready.
+status: Failed, message: Progress deadline exceeded
+resource Deployment/kube-system/hubble-ui not ready.
+```
+
+### Causes
+
+- 4 GB control plane is tight once API server, etcd, Cilium, and Hubble run together
+- Hubble Relay peer dial timeout is too aggressive on slow VirtualBox/NAT labs
+- Hubble UI image pulls / memory pressure cause rollout deadlines on small hosts
+- A previous failed rollout leaves Deployments stuck, so the next `--wait` install fails immediately
+
+### What the project does now
+
+`scripts/install-cilium.sh` installs in phases:
+
+1. Cilium dataplane + Hubble on agents
+2. Hubble Relay (required), with higher dial/retry timeouts and lower resource requests
+3. Hubble UI only when `ENABLE_HUBBLE_UI=true` (optional; off by default)
+
+### Recovery on an existing VM
+
+Update the project files from git (so `/vagrant/scripts/install-cilium.sh` is current), then:
+
+```bat
+vagrant ssh k8s-master -c "sudo kubectl -n kube-system delete deploy hubble-relay hubble-ui --ignore-not-found"
+vagrant ssh k8s-master -c "sudo bash /vagrant/scripts/install-cilium.sh"
+```
+
+After Cilium/Hubble are healthy, continue bringing up workers if needed:
+
+```bat
+vagrant up
+```
+
+Inspect diagnostics written during failures:
+
+```bat
+type .cluster\cilium-diagnostics.txt
+```
+
+### Optional: enable Hubble UI
+
+If the host has spare RAM/CPU, provision with:
+
+```bat
+set ENABLE_HUBBLE_UI=true
+vagrant ssh k8s-master -c "sudo ENABLE_HUBBLE_UI=true bash /vagrant/scripts/install-cilium.sh"
+```
+
+---
+
 ## Connectivity test failures
 
 `cilium connectivity test` is strict and can fail if:
